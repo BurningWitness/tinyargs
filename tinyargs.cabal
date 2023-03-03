@@ -1,0 +1,52 @@
+cabal-version:       2.2
+
+name:                tinyargs
+version:             0.1.0.0
+synopsis:            Tiny commandline parser
+description:         Tiny flexible commandline parser and help builder
+license:             BSD-3-Clause
+license-file:        LICENSE
+author:              Oleksii Divak
+maintainer:          Oleksii Divak <frozenwitness@gmail.com>
+copyright:           Copyright (C) 2023 Oleksii Divak
+category:            Graphics
+build-type:          Simple
+
+library
+  exposed-modules:  System.Console.Args.Tiny
+
+  other-modules:    Data.RadixTree.Internal
+
+  hs-source-dirs:   common
+                  , src
+
+  build-depends:    base >= 4 && < 5
+                  , containers
+
+  ghc-options:      -Wall
+
+  default-language: Haskell2010
+
+test-suite compliance
+  type:             exitcode-stdio-1.0
+
+  main-is:          Main.hs
+
+  hs-source-dirs:   common
+                  , test/compliance
+
+  build-depends:    base >= 4 && < 5
+                  , containers
+                  , hspec
+                  , tinyargs
+
+  ghc-options:      -Wall
+
+  default-language: Haskell2010
+
+
+
+
+source-repository head
+  type: git
+  location: git://github.com/BurningWitness/tinyargs.git
