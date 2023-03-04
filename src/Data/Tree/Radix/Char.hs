@@ -12,6 +12,7 @@ module Data.Tree.Radix.Char
   , singleton
   , lookup
   , insert
+  , insertWith
   ) where
 
 import           Data.Tree.Radix.Char.Internal

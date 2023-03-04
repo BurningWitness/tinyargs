@@ -5,6 +5,7 @@ module Data.Tree.Radix.Char.Internal
   , singleton
   , lookup
   , insert
+  , insertWith
   , showTree
   ) where
 
@@ -69,14 +70,19 @@ commonPrefix as bs
 
 
 
--- | Insert a new key and value into the tree.
+-- | Insert a new key and value into the tree. If the key is already present
+--   in the tree, the associated value is replaced with the supplied one.
 --
---   If the key is already present in the tree,
---   the associated value is replaced with the supplied one.
+--   @'insert'@ is equivalent to @\\k v -> 'insertWith' ('const' v) k v@.
+insert :: String -> a -> Tree a -> Tree a
+insert ls v = insertWith (const v) ls v
+
+-- | Insert a new key and value into the tree. If the key is already present
+--   in the tree, the supplied function is applied to it instead.
 --
 --   The key is traversed lazily, left to right, comparing each character at most once.
-insert :: String -> a -> Tree a -> Tree a
-insert ls v (Tree tree) = Tree $ go ls tree
+insertWith :: (a -> a) -> String -> a -> Tree a -> Tree a
+insertWith f ls v (Tree tree) = Tree $ go ls tree
   where
     go as (Edge bs mayx t) =
       let (common, xs, ys) = commonPrefix as bs
@@ -87,15 +93,20 @@ insert ls v (Tree tree) = Tree $ go ls tree
                          IntMap.insert (ord y) (Edge yt mayx t) $
                            IntMap.singleton (ord x) (Edge xt (Just v) IntMap.empty)
 
-               [] -> Edge common mayx .
-                       (\f -> IntMap.alter f (ord x) t) $ \mayEdge ->
-                          Just $ case mayEdge of
-                                   Nothing -> Edge xt (Just v) IntMap.empty
-                                   Just o  -> go xt o
+               []   -> Edge common mayx .
+                         (\g -> IntMap.alter g (ord x) t) $ \mayEdge ->
+                            Just $ case mayEdge of
+                                     Nothing -> Edge xt (Just v) IntMap.empty
+                                     Just o  -> go xt o
 
-           ([]  , _) -> Edge common (Just v) t
+           ([]  , _) ->
+             case ys of
+               y:yt -> Edge common (Just v) $
+                         IntMap.singleton (ord y) (Edge yt mayx t)
 
-insert as v Empty = singleton as v
+               []   -> Edge common (Just $ maybe v f mayx) t
+
+insertWith _ as v Empty = singleton as v
 
 
 

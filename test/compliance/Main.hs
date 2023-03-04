@@ -136,6 +136,21 @@ main =
             )
             `shouldBe` Just (1 :: Int)
 
+        it "Extending" $ do
+          Radix.lookup "thistle"
+            ( Radix.insert "thistle" 2 $ Radix.singleton "this" 1 )
+            `shouldBe` Just (2 :: Int)
+
+        it "Undercutting" $ do
+          Radix.lookup "this"
+            ( Radix.insert "this" 2 $ Radix.singleton "thistle" 1 )
+            `shouldBe` Just (2 :: Int)
+
+        it "Clobber" $ do
+          Radix.lookup "this"
+            ( Radix.insertWith (+2) "this" 2 $ Radix.singleton "this" 1 )
+            `shouldBe` Just (3 :: Int)
+
       describe "Second level lookups" $ do
         it "Single" $ do
           Radix.lookup "thief"
