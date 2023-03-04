@@ -85,8 +85,7 @@ module System.Console.Args.Tiny
 
 import           Data.IntMap (IntMap)
 import qualified Data.IntMap as IntMap
-import           Data.RadixTree.Internal (RadixTree)
-import qualified Data.RadixTree.Internal as Radix
+import qualified Data.Tree.Radix.Char as Radix
 
 import           Data.Char (ord)
 import qualified Data.List as List
@@ -252,7 +251,7 @@ data State s = Full
 
 
 
-argmaps :: [Block s] -> (IntMap (Flavor s), RadixTree Char (Flavor s))
+argmaps :: [Block s] -> (IntMap (Flavor s), Radix.Tree (Flavor s))
 argmaps = foldr go (IntMap.empty, Radix.empty) . mapMaybe wither
   where
     wither (Opt opt) = Just opt
@@ -261,7 +260,7 @@ argmaps = foldr go (IntMap.empty, Radix.empty) . mapMaybe wither
     go o acc = foldr (subgo $ optFlavor o) acc (optNames o)
 
     subgo f (Short s) (ss, ls) = (IntMap.insert (ord s) f ss, ls)
-    subgo f (Long l)  (ss, ls) = (ss, Radix.insert ord l f ls)
+    subgo f (Long l)  (ss, ls) = (ss, Radix.insert l f ls)
 
 
 
@@ -313,7 +312,7 @@ parseArgs order0 parts s0 args0 = go order0 Full [] args0 s0
 
             '-':'-':verylong ->
               let (long, rawvalue) = List.span (/= '=') verylong
-              in case Radix.lookup ord long longmap of
+              in case Radix.lookup long longmap of
                    Nothing     -> Left $ "Unrecognized option " <> composeName (Long long)
                    Just flavor ->
                      case flavor of

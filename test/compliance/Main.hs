@@ -2,10 +2,9 @@
 
 module Main where
 
-import qualified Data.RadixTree.Internal as Radix
+import qualified Data.Tree.Radix.Char as Radix
 import           System.Console.Args.Tiny
 
-import           Data.Char
 import           Data.Either
 import           Data.Maybe
 import           Data.Functor.Identity
@@ -112,62 +111,62 @@ main =
     describe "Radix tree" $ do
       describe "Top level lookups" $ do
         it "Singleton" $ do
-          Radix.lookup ord "this" (Radix.singleton "this" 1) `shouldBe` Just (1 :: Int)
+          Radix.lookup "this" (Radix.singleton "this" 1) `shouldBe` Just (1 :: Int)
 
         it "Unrelated" $ do
-          Radix.lookup ord "this"
-            (Radix.insert ord "separate" 2 $ Radix.singleton "this" 1)
+          Radix.lookup "this"
+            (Radix.insert "separate" 2 $ Radix.singleton "this" 1)
             `shouldBe` Just (1 :: Int)
 
         it "Single split" $ do
-          Radix.lookup ord "this" (Radix.insert ord "that" 2 $ Radix.singleton "this" 1)
+          Radix.lookup "this" (Radix.insert "that" 2 $ Radix.singleton "this" 1)
             `shouldBe` Just (1 :: Int)
 
         it "Double split" $ do
-          Radix.lookup ord "this"
-            ( Radix.insert ord "third" 3
-               . Radix.insert ord "that" 2 $ Radix.singleton "this" 1
+          Radix.lookup "this"
+            ( Radix.insert "third" 3
+               . Radix.insert "that" 2 $ Radix.singleton "this" 1
             )
             `shouldBe` Just (1 :: Int)
 
         it "Two-level split" $ do
-          Radix.lookup ord "this"
-            ( Radix.insert ord "trench" 3
-               . Radix.insert ord "tat" 2 $ Radix.singleton "this" 1
+          Radix.lookup "this"
+            ( Radix.insert "trench" 3
+               . Radix.insert "tat" 2 $ Radix.singleton "this" 1
             )
             `shouldBe` Just (1 :: Int)
 
       describe "Second level lookups" $ do
         it "Single" $ do
-          Radix.lookup ord "thief"
-            (Radix.insert ord "thief" 2 $ Radix.singleton "this" 1)
+          Radix.lookup "thief"
+            (Radix.insert "thief" 2 $ Radix.singleton "this" 1)
             `shouldBe` Just (2 :: Int)
 
         it "Unrelated" $ do
-          Radix.lookup ord "thief"
-            ( Radix.insert ord "separate" 3
-                . Radix.insert ord "thief" 2 $ Radix.singleton "this" 1
+          Radix.lookup "thief"
+            ( Radix.insert "separate" 3
+                . Radix.insert "thief" 2 $ Radix.singleton "this" 1
             )
             `shouldBe` Just (2 :: Int)
 
         it "Same level split" $ do
-          Radix.lookup ord "thief"
-            ( Radix.insert ord "thither" 3
-                . Radix.insert ord "thief" 2 $ Radix.singleton "this" 1
+          Radix.lookup "thief"
+            ( Radix.insert "thither" 3
+                . Radix.insert "thief" 2 $ Radix.singleton "this" 1
             )
             `shouldBe` Just (2 :: Int)
 
         it "Earlier split" $ do
-          Radix.lookup ord "thief"
-            ( Radix.insert ord "trench" 3
-               . Radix.insert ord "thief" 2 $ Radix.singleton "this" 1
+          Radix.lookup "thief"
+            ( Radix.insert "trench" 3
+               . Radix.insert "thief" 2 $ Radix.singleton "this" 1
             )
             `shouldBe` Just (2 :: Int)
 
         it "Later split" $ do
-          Radix.lookup ord "thief"
-            ( Radix.insert ord "thistle" 3
-               . Radix.insert ord "thief" 2 $ Radix.singleton "this" 1
+          Radix.lookup "thief"
+            ( Radix.insert "thistle" 3
+               . Radix.insert "thief" 2 $ Radix.singleton "this" 1
             )
             `shouldBe` Just (2 :: Int)
 
