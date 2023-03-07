@@ -1,4 +1,8 @@
-{-# LANGUAGE Rank2Types #-}
+{-# LANGUAGE FlexibleInstances
+           , Rank2Types
+           , StandaloneDeriving #-}
+
+{-# OPTIONS_GHC -Wno-orphans #-}
 
 module Main where
 
@@ -12,6 +16,15 @@ import           Prelude hiding (lookup)
 import           Test.Hspec hiding (Example, example)
 
 
+
+deriving instance Show Name
+
+deriving instance Show (Reason String)
+deriving instance Show (Failure String)
+
+deriving instance Eq Name
+deriving instance Eq e => Eq (Reason e)
+deriving instance Eq e => Eq (Failure e)
 
 data Example =
        Example
@@ -51,18 +64,18 @@ five  f e = (\x -> e { _five  = x }) <$> f (_five e)
 six   f e = (\x -> e { _six   = x }) <$> f (_six e)
 seven f e = (\x -> e { _seven = x }) <$> f (_seven e)
 
-flag :: Lens' s a -> (a -> Either String a) -> Flavor s
+flag :: Lens' s a -> (a -> Either e a) -> Flavor e s
 flag lens f = Plain $ lens f
 
-opt :: String -> Lens' s a -> (a -> Maybe String -> Either String a) -> Flavor s
+opt :: String -> Lens' s a -> (a -> Maybe String -> Either e a) -> Flavor e s
 opt name lens f = Optional name $ \s o -> lens (flip f o) s
 
-req :: String -> Lens' s a -> (a -> String -> Either String a) -> Flavor s
+req :: String -> Lens' s a -> (a -> String -> Either e a) -> Flavor e s
 req name lens f = Required name $ \s o -> lens (flip f o) s
 
 
 
-example :: [Block Example]
+example :: [Block String Example]
 example =
   [ Block $
       mconcat
@@ -89,12 +102,14 @@ example =
   , xoption [Short '4', Long "option-four"] "Sneaky fourth option" $
       req "ARG4" four $ \_ -> Right . Just
   , Block "\nSmaller category"
-  , option [Long "option-five"] "Fifth option\nAlso a newline" $
-      req "ARG5" five $ \_ -> Right . Just
+  , option [Short '5', Long "option-five"] "Fifth option\nAlso a newline" $
+      req "ARG5" five $ \_ -> Left . (<>) "No "
   , Block "\nLarger category"
   , option [Long "option-six", Long "synonym-for-option-six", Short '6']
       "Indented sixth option"
-      . opt "ARG6" six $ \_ -> Right
+      . opt "ARG6" six $ \_ m -> Left $ case m of
+                                          Just msg -> "No " <> msg
+                                          Nothing  -> "Empty"
   , option [ Short '7', Long "option-seven", Long "synonym-for-option-seven"
            , Long "another-option-seven" ] "Overbearing seventh option" $
       flag seven $ \_ -> Right (Just "other flag")
@@ -102,7 +117,7 @@ example =
 
 
 
-run :: Order Example -> [String] -> Either String (Example, [String])
+run :: Order String Example -> [String] -> Either (Failure String) (Example, [String])
 run order = parseArgs order example defExample
 
 main :: IO ()
@@ -286,3 +301,82 @@ main =
           run Permute ["foo", "--option-three", "bar", "baz"]
             `shouldBe` Right ( set three (Just "bar") defExample, ["foo", "baz"] )
 
+    describe "Error sanity" $ do
+      describe "Unrecognized" $ do
+        it "Short" $
+          run Permute ["-u"] `shouldSatisfy` \err ->
+            case err of
+              Left (Failure 1 "-u" (Unrecognized (Short 'u'))) -> True
+              _                                             -> False
+
+        it "Long" $
+          run Permute ["--unrecognized"] `shouldSatisfy` \err ->
+            case err of
+              Left (Failure 1 "--unrecognized" (Unrecognized (Long "unrecognized"))) -> True
+              _                                                                      -> False
+
+      describe "Unsaturated" $ do
+        it "Short" $
+          run Permute ["-3"] `shouldSatisfy` \err ->
+            case err of
+              Left (Failure 1 "-3" (Unsaturated (Short '3'))) -> True
+              _                                               -> False
+
+        it "Long" $
+          run Permute ["--option-three"] `shouldSatisfy` \err ->
+            case err of
+              Left (Failure 1 "--option-three" (Unsaturated (Long "option-three"))) -> True
+              _                                                                     -> False
+
+      it "Oversaturated" $
+        run Permute ["--option-one=foo"] `shouldSatisfy` \err ->
+          case err of
+            Left (Failure 1 "--option-one=foo" (Oversaturated "option-one" "foo")) -> True
+            _                                                                      -> False
+
+      describe "OptionFailed" $ do
+        describe "Short" $ do
+          describe "Optional" $ do
+            it "Empty" $
+              run Permute ["-6"] `shouldSatisfy` \err ->
+                case err of
+                  Left (Failure 1 "-6" (OptionFailed (Short '6') Nothing "Empty")) -> True
+                  _                                                                -> False
+
+            it "Filled" $
+              run Permute ["-6Foo"] `shouldSatisfy` \err ->
+                case err of
+                  Left (Failure 1 "-6Foo" (OptionFailed (Short '6') (Just "Foo") "No Foo")) -> True
+                  _                                                                         -> False
+
+          it "Required" $
+            run Permute ["-5Foo"] `shouldSatisfy` \err ->
+              case err of
+                Left (Failure 1 "-5Foo" (OptionFailed (Short '5') (Just "Foo") "No Foo")) -> True
+                _                                                                         -> False
+
+        describe "Long" $ do
+          describe "Optional" $ do
+            it "Empty" $
+              run Permute ["--option-six"] `shouldSatisfy` \err ->
+                case err of
+                  Left (Failure 1 "--option-six" (OptionFailed (Long "option-six") Nothing "Empty")) -> True
+                  _                                                                                  -> False
+
+            it "Filled" $
+              run Permute ["--option-six=Foo"] `shouldSatisfy` \err ->
+                case err of
+                  Left (Failure 1 "--option-six=Foo" (OptionFailed (Long "option-six") (Just "Foo") "No Foo")) -> True
+                  _                                                                                            -> False
+
+          it "Required" $
+            run Permute ["--option-five", "Foo"] `shouldSatisfy` \err ->
+              case err of
+                Left (Failure 1 "--option-five" (OptionFailed (Long "option-five") (Just "Foo") "No Foo")) -> True
+                _                                                                                          -> False
+
+      it "ArgumentFailed" $
+        run (ReturnInOrder $ \_ -> Left . (<>) "No ") ["-1", "Foo"] `shouldSatisfy` \err ->
+          case err of
+            Left (Failure 2 "Foo" (ArgumentFailed "No Foo")) -> True
+            _                                                -> False

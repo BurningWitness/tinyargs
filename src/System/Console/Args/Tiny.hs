@@ -1,4 +1,5 @@
-{-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE RecordWildCards
+           , ScopedTypeVariables #-}
 
 {- | Short flexible argument templater following
      [POSIX](https://pubs.opengroup.org/onlinepubs/9699919799/basedefs/V1_chap12.html)
@@ -69,6 +70,7 @@
 module System.Console.Args.Tiny
   ( -- * Types
     Name (..)
+  , composeName
   , Flavor (..)
   , Option (..)
   , Block (..)
@@ -81,6 +83,10 @@ module System.Console.Args.Tiny
     -- * Parsing arguments
   , Order (..)
   , parseArgs
+    -- ** Failure
+  , Failure (..)
+  , Reason (..)
+  , showFailure
   ) where
 
 import           Data.IntMap (IntMap)
@@ -98,38 +104,38 @@ data Name = Short Char  -- ^ As in @-s@.
           | Long String -- ^ As in @--long-option@.
 
 -- | Option behavior.
-data Flavor s = -- | Option takes no arguments.
-                Plain (s -> Either String s)
-                -- | Option takes an optional argument.
-              | Optional
-                  String -- ^ Help description for the argument
-                  (s -> Maybe String -> Either String s)
-                -- | Option requires an argument.
-              | Required
-                  String -- ^ Help description for the argument
-                  (s -> String -> Either String s)
+data Flavor e s = -- | Option takes no arguments.
+                  Plain (s -> Either e s)
+                  -- | Option takes an optional argument.
+                | Optional
+                    String -- ^ Help description for the argument
+                    (s -> Maybe String -> Either e s)
+                  -- | Option requires an argument.
+                | Required
+                    String -- ^ Help description for the argument
+                    (s -> String -> Either e s)
 
-data Option s =
+data Option e s =
        Option
-         { optHidden :: Bool     -- ^ If 'True', this option is hidden from help.
-         , optNames  :: [Name]   -- ^ If empty, this option is both hidden from help
-                                 --   and impossible to invoke.
-         , optInfo   :: String   -- ^ Help description, shown to the right
-                                 --   (and below if needed) of the option name list.
-         , optFlavor :: Flavor s
+         { optHidden :: Bool       -- ^ If 'True', this option is hidden from help.
+         , optNames  :: [Name]     -- ^ If empty, this option is both hidden from help
+                                   --   and impossible to invoke.
+         , optInfo   :: String     -- ^ Help description, shown to the right
+                                   --   (and below if needed) of the option name list.
+         , optFlavor :: Flavor e s
          }
 
 
 
-data Block s = Block String
-             | Opt (Option s)
+data Block e s = Block String
+               | Opt (Option e s)
 
 -- | Shorthand for a visible 'Option'.
-option :: [Name] -> String -> Flavor s -> Block s
+option :: [Name] -> String -> Flavor e s -> Block e s
 option name info = Opt . Option False name info
 
 -- | Shorthand for a hidden 'Option'.
-xoption :: [Name] -> String -> Flavor s -> Block s
+xoption :: [Name] -> String -> Flavor e s -> Block e s
 xoption name info = Opt . Option True name info
 
 
@@ -140,19 +146,19 @@ data Format =
                                   --   a short argument.
          , formLongOffset  :: Int -- ^ Offset of an option that starts with
                                   --   a long argument.
+         , formDescOffset  :: Int -- ^ Option description offset.
          , formDescPadding :: Int -- ^ If flags take up more than 'formDescOffset',
                                   --   but description can still be fit in the remaining
                                   --   space, this is the padding increment its aligned
                                   --   against.
-         , formDescOffset  :: Int -- ^ Option description offset.
          , formLineWidth   :: Int -- ^ Total width of a line.
          }
 
 -- | @
 --'formShortOffset' = 2
 --'formLongOffset'  = 6
---'formDescPadding' = 5
 --'formDescOffset'  = 30
+--'formDescPadding' = 5
 --'formLineWidth'   = 80 @
 defFormat :: Format
 defFormat =
@@ -166,9 +172,12 @@ defFormat =
 
 
 
+-- | Convert typed name into a raw 'String'.
 composeName :: Name -> String
 composeName (Short s) = '-' : s : []
 composeName (Long l)  = '-' : '-' : l
+
+
 
 breakOn :: (a -> Bool) -> [a] -> [[a]]
 breakOn _ [] = []
@@ -195,7 +204,7 @@ remup a n = a + n - rem a n
 pad :: Char -> Int -> String -> String
 pad c n s = s <> replicate (n - length s) c
 
-composeOption :: Format -> Option s -> String
+composeOption :: Format -> Option e s -> String
 composeOption Format {..} Option {..} =
   let flags = case optNames of
                 Short _ : _ -> replicate formShortOffset ' '
@@ -230,7 +239,7 @@ composeLine :: Format -> String -> String
 composeLine format = List.intercalate "\n" . splitInfo (formLineWidth format)
 
 -- | Composes a string in the format typically used for @--help@ options.
-composeHelp :: Format -> [Block s] -> String
+composeHelp :: Format -> [Block e s] -> String
 composeHelp format = foldr combine []
   where
     combine (Block text) = mappend (composeLine format text) . (:) '\n'
@@ -240,18 +249,19 @@ composeHelp format = foldr combine []
 
 
 -- | Similar to "System.Console.GetOpt.ArgOrder".
-data Order s = RequireOrder -- ^ First non-option marks end of options
-             | Permute      -- ^ Non-options are freely interspersed with options
-             | ReturnInOrder (s -> String -> Either String s)
-               -- ^ Parse every non-option argument with the provided function
+data Order e s = RequireOrder -- ^ First non-option marks end of options
+               | Permute      -- ^ Non-options are freely interspersed with options
+               | ReturnInOrder (s -> String -> Either e s)
+                 -- ^ Parse every non-option argument with the provided function
 
-data State s = Full
-             | Give (s -> Maybe String -> Either String s)
-             | Take Name (s -> String -> Either String s)
+-- Int, Name, String here all relate to the argument requesting the update
+data State e s = Full
+               | Give Int Name String (s -> Maybe String -> Either e s)
+               | Take Int Name String (s -> String -> Either e s)
 
 
 
-argmaps :: [Block s] -> (IntMap (Flavor s), Radix.Tree (Flavor s))
+argmaps :: [Block e s] -> (IntMap (Flavor e s), Radix.Tree (Flavor e s))
 argmaps = foldr go (IntMap.empty, Radix.empty) . mapMaybe wither
   where
     wither (Opt opt) = Just opt
@@ -264,86 +274,165 @@ argmaps = foldr go (IntMap.empty, Radix.empty) . mapMaybe wither
 
 
 
+data Failure e = Failure
+                   Int        -- ^ Position of the option that could not be applied
+                   String     -- ^ Argument at the aforementioned position
+                   (Reason e)
+
+data Reason e =  -- | Option name isn't on the list
+                 Unrecognized Name
+                 -- | Option requires an argument, but none was provided
+               | Unsaturated Name
+                 -- | Option takes no arguments, but was provided with none
+               | Oversaturated
+                   String -- ^ Long option name
+                   String -- ^ Argument passed to the option
+
+                 -- | State update failure when parsing an option
+               | OptionFailed
+                   Name
+                   (Maybe String) -- ^ Argument passed to the option, if any
+                   e
+
+                 -- | State update failure when parsing a non-option argument
+                 --   (only reachable when 'ReturnInOrder' is used).
+               | ArgumentFailed e
+
+-- | Basic printer for failures. Uses only option names and update failure messages.
+showFailure :: (e -> String) -> Failure e -> String
+showFailure conv (Failure _n arg reason) =
+  case reason of
+    Unrecognized name   -> "Unrecognized option " <> composeName name
+    Unsaturated name    -> "Option " <> composeName name <> " requires an argument"
+    Oversaturated long _arg ->
+      "Option " <> composeName (Long long) <> " does not accept arguments"
+
+    OptionFailed name _mayArg e ->
+      "Could not apply option " <> composeName name <> ": " <> conv e
+
+    ArgumentFailed e  ->
+      "Could not apply argument " <> arg <> ": " <> conv e
+
+
+
 -- | Parses the provided list of commandline arguments.
 --
 --   The argument list is traversed left to right.
 --
---   The return is either an error or an altered state together with
+--   The return is either a 'Failure' or an altered state together with
 --   a list of non-option arguments.
-parseArgs :: Order s -> [Block s] -> s -> [String] -> Either String (s, [String])
-parseArgs order0 parts s0 args0 = go order0 Full [] args0 s0
+parseArgs :: forall e s. Order e s -> [Block e s] -> s -> [String] -> Either (Failure e) (s, [String])
+parseArgs order0 parts s0 args0 = go order0 Full [] (zip [1..] args0) s0
   where
+    shortmap :: IntMap (Flavor e s)
+    longmap :: Radix.Tree (Flavor e s)
     (shortmap, longmap) = argmaps parts
 
-    goshort order reqs args []           s = go order Full reqs args s
-    goshort order reqs args (short:rest) s =
+    goshort order reqs args _   _ []           s = go order Full reqs args s
+    goshort order reqs args arg n (short:rest) s =
       case IntMap.lookup (ord short) shortmap of
-        Nothing     -> Left $ "Unrecognized argument " <> composeName (Short short)
+        Nothing     -> Left . Failure n arg $ Unrecognized (Short short)
         Just flavor ->
           case flavor of
             Plain f ->
-              f s >>= case rest of
-                        [] -> go      order Full reqs args
-                        _  -> goshort order      reqs args rest
+              case f s of
+                Right a -> case rest of
+                             [] -> go      order Full reqs args            a
+                             _  -> goshort order      reqs args arg n rest a
+
+                Left e  -> Left . Failure n arg $ OptionFailed (Short short) Nothing e
 
             Optional _ f ->
-               let input = case rest of
-                             [] -> Nothing
-                             _  -> Just rest
+              let input = case rest of
+                            [] -> Nothing
+                            _  -> Just rest
 
-               in go order Full reqs args =<< f s input
+              in case f s input of
+                   Right a -> go order Full reqs args a
+                   Left e  -> Left . Failure n arg $ OptionFailed (Short short) input e
 
             Required _ f ->
               case rest of
-                [] -> go order (Take (Short short) f) reqs args s
-                _  -> go order Full reqs args =<< f s rest
+                [] -> go order (Take n (Short short) arg f) reqs args s
+                _  ->
+                  case f s rest of
+                    Right a -> go order Full reqs args a
+                    Left e  ->
+                      Left . Failure n arg $ OptionFailed (Short short) (Just rest) e
 
+    go :: Order e s -> State e s -> [String] -> [(Int, String)] -> s -> Either (Failure e) (s, [String])
     go _     state reqs      []    s =
       case state of
-        Full         -> Right (s, reverse reqs)
-        Give f       -> flip (,) (reverse reqs) <$> f s Nothing
-        Take name _f -> Left $ "Option " <> composeName name <> " requires an argument"
+        Full               -> Right (s, reverse reqs)
+        Give n name arg f  ->
+          case f s Nothing of
+            Right a -> Right (a, reverse reqs)
+            Left e  -> Left . Failure n arg $ OptionFailed name Nothing e
 
-    go order state reqs (arg:args) s =
+        Take n name arg _f -> Left . Failure n arg $ Unsaturated name
+
+    go order state reqs ((n, arg):args) s =
       case state of
         Full ->
           case arg of
-            '-':'-':[]       -> Right (s, reverse reqs <> args)
+            '-':'-':[]       -> Right (s, reverse reqs <> fmap snd args)
 
             '-':'-':verylong ->
               let (long, rawvalue) = List.span (/= '=') verylong
               in case Radix.lookup long longmap of
-                   Nothing     -> Left $ "Unrecognized option " <> composeName (Long long)
+                   Nothing     -> Left . Failure n arg $ Unrecognized (Long long)
                    Just flavor ->
                      case flavor of
                        Plain f ->
                          case rawvalue of
-                           [] -> go order Full reqs args =<< f s
-                           _  -> Left $ "Option " <> composeName (Long long) <> " does not accept arguments"
+                           [] -> case f s of
+                                   Right a -> go order Full reqs args a
+                                   Left e  -> Left . Failure n arg $
+                                                       OptionFailed (Long long) Nothing e
+
+                           _:value -> Left . Failure n arg $ Oversaturated long value
 
                        Optional _ f ->
                          let input = case rawvalue of
-                                       [] -> Nothing
-                                       _  -> Just $ drop 1 rawvalue
+                                       []      -> Nothing
+                                       _:value -> Just value
 
-                         in go order Full reqs args =<< f s input
+                         in case f s input of
+                              Right a -> go order Full reqs args a
+                              Left e  -> Left . Failure n arg $
+                                                  OptionFailed (Long long) input e
 
                        Required _ f ->
                          case rawvalue of
-                           [] -> go order (Take (Long long) f) reqs args s
-                           _  -> go order Full reqs args =<< f s (drop 1 rawvalue)
+                           []      -> go order (Take n (Long long) arg f) reqs args s
+                           _:value ->
+                             case f s value of
+                               Right a -> go order Full reqs args a
+                               Left e  ->
+                                 Left . Failure n arg $
+                                          OptionFailed (Long long) (Just value) e
 
-            '-':rest -> goshort order reqs args rest s
+            '-':rest -> goshort order reqs args arg n rest s
 
             _            ->
               case order of
-                RequireOrder    -> Right (s, reverse reqs <> (arg:args))
+                RequireOrder    -> Right (s, reverse reqs <> (arg:fmap snd args))
                 Permute         -> go order Full (arg:reqs) args s
-                ReturnInOrder f -> go order Full reqs args =<< f s arg
+                ReturnInOrder f -> case f s arg of
+                                     Right a -> go order Full reqs args a
+                                     Left e  -> Left . Failure n arg $ ArgumentFailed e
 
-        Give f ->
+        Give p name parg f ->
           case arg of
-            '-':_ -> go order Full reqs (arg:args) =<< f s Nothing
-            _     -> go order Full reqs      args  =<< f s (Just arg)
+            '-':_ -> case f s Nothing of
+                       Right a -> go order Full reqs ((p, parg):args) a
+                       Left e  -> Left . Failure p parg $ OptionFailed name Nothing e
 
-        Take _name f -> go order Full reqs args =<< f s arg
+            _     -> case f s $ Just arg of
+                       Right a -> go order Full reqs      args  a
+                       Left e  -> Left . Failure p parg $ OptionFailed name (Just arg) e
+
+        Take p name parg f ->
+          case f s arg of
+            Right a -> go order Full reqs args a
+            Left e  -> Left . Failure p parg $ OptionFailed name (Just arg) e
